@@ -1,0 +1,179 @@
+EVALUATION RESULTS -- every evaluation we have run so far
+==========================================================
+Last updated 2026-11-08. Aggregate numbers only: no labels, tracking or per-frame output is kept
+in this repository (see RULES.md and .gitignore).
+
+Metrics (official code in evaluation/possession_metrics.py):
+  spellF1  how well whole possessions are found: mean F1 over IoU 0.3..0.7. RANKING METRIC.
+  macroF1  per-frame F1 averaged over H, A, D. Tie-break.
+  Differences below about 0.04 spellF1 are noise.
+
+How every bench below works:
+  - 9 external matches: 7 DFL Bundesliga (J03W..) + Metrica sample games 2 and 3.
+  - Leave one match out: each match is scored by a model trained on the other 8 only.
+  - Viterbi switch costs are chosen fairly: for each match, the costs that score best on the
+    OTHER 8 matches are used. "costs" = team switch / dead-ball switch.
+  - BAR-ATH is never used for training, and the public 5 minutes are never used to choose anything.
+
+Methods compared:
+  baseline     the starter's nearest player, smoothed +/- 2 s (baseline_smooth50)
+  model raw    LightGBM, most likely label per frame
+  model +1/+2s LightGBM probabilities averaged over +/- 1 s or 2 s (stand-in before Viterbi)
+  viterbi      LightGBM + Viterbi (pipeline/viterbi.py) -- what submit.py uses
+
+
+SUMMARY (mean over the 9 matches)
+---------------------------------
+                                             baseline  model raw  model+2s  VITERBI  macroF1
+  Bench 1  supplied gapped copies, 18 feat.     0.116      0.078     0.294    0.332    0.786
+  Bench 2  BAR-ATH-style Metrica, 18 feat.      0.174      0.100     0.348    0.378    0.804
+  Bench 3  as bench 2, 57 features (current)    0.174      0.170     0.419    0.443    0.834
+
+  Bench 3 beat bench 2 on all 9 matches (+0.041 to +0.099 spellF1, mean +0.065).
+  For reference, the starter baseline scores 0.2433 on the full BAR-ATH match (EVALUATION.md).
+  Bench 2's Metrica copies are easier than BAR-ATH (baseline 0.34-0.37 there), so BAR-ATH
+  probably scores somewhere between bench 1 and bench 2/3.
+
+
+BENCH 1 -- the gapped copies we were sent, 18 features
+------------------------------------------------------
+Data: DFL tracking_with_gaps + Metrica *_with_gaps. Much more damaged than BAR-ATH
+(ball seen ~30% in Metrica copies vs 59% in BAR-ATH).
+
+  match       baseline  model raw  model+1s  model+2s  viterbi  macroF1  costs  pred/true poss.
+  J03WMX         0.122      0.092     0.248     0.286    0.315    0.825  30/60    233/511
+  J03WN1         0.128      0.089     0.249     0.283    0.286    0.768  30/60    233/500
+  J03WOH         0.131      0.103     0.297     0.353    0.386    0.829  30/60    219/402
+  J03WOY         0.135      0.091     0.277     0.320    0.321    0.809  30/60    221/456
+  J03WPY         0.106      0.083     0.278     0.321    0.364    0.827  30/60    217/421
+  J03WQQ         0.108      0.074     0.258     0.300    0.322    0.812  30/60    256/401
+  J03WR9         0.126      0.075     0.260     0.322    0.382    0.845  30/60    208/370
+  metrica_2      0.097      0.055     0.203     0.242    0.324    0.678  30/60    258/330
+  metrica_3      0.090      0.041     0.155     0.219    0.288    0.682  30/60    288/372
+  MEAN           0.116      0.078     0.247     0.294    0.332    0.786
+
+  Top features (share of gain): ball_speed 0.37, home_speed 0.16, away_speed 0.08, dist_home 0.08
+
+
+BENCH 2 -- DFL gapped copies + Metrica damaged BAR-ATH style, 18 features
+-------------------------------------------------------------------------
+Data: DFL tracking_with_gaps (unchanged) + Metrica originals damaged by pipeline/damage.py
+(seed 1): players removed the way BAR-ATH loses them, ball left as recorded (Metrica already
+loses the ball like BAR-ATH: ~59% seen).
+
+  match       baseline  model raw  model+1s  model+2s  viterbi  macroF1  costs  pred/true poss.
+  J03WMX         0.122      0.087     0.254     0.303    0.319    0.828  30/60    262/511
+  J03WN1         0.128      0.090     0.258     0.288    0.298    0.770  30/60    246/500
+  J03WOH         0.131      0.099     0.298     0.363    0.385    0.833  30/60    229/402
+  J03WOY         0.135      0.086     0.286     0.324    0.354    0.808  15/60    322/456
+  J03WPY         0.106      0.084     0.285     0.320    0.359    0.816  15/60    309/421
+  J03WQQ         0.108      0.068     0.266     0.320    0.336    0.806  15/60    375/401
+  J03WR9         0.126      0.081     0.249     0.312    0.386    0.830  15/60    301/370
+  metrica_2      0.371      0.151     0.459     0.488    0.514    0.770  15/60    255/330
+  metrica_3      0.341      0.150     0.416     0.417    0.451    0.775  30/60    239/372
+  MEAN           0.174      0.100     0.308     0.348    0.378    0.804
+
+  Top features: ball_speed 0.36, away_speed 0.12, dist_home 0.10, home_speed 0.09
+
+  What it misses (bench 2, 3763 true possessions; "found" = same team, overlap IoU >= 0.5):
+    found overall                         32%
+    by length:   < 2 s  4%  |  2-5 s  23%  |  5-10 s  44%  |  10-20 s  64%  |  > 20 s  75%
+                 (59% of all true possessions are shorter than 5 s)
+    after a turnover in open play         25%   (2912 possessions)
+    after a dead ball / kickoff           54%   (851 possessions)
+    ball mostly missing during it         13%   (788 possessions)
+    per frame: right team while ball live ~80-82%; dead ball labelled D 93%
+
+
+BENCH 3 -- as bench 2, with time-context features (57 features) -- CURRENT MODEL
+--------------------------------------------------------------------------------
+New features (pipeline/model_features.py, add_time_context): means over 0.5 / 1 / 2 s before
+and after each frame of dist_difference, dist_home, dist_away, ball_speed, home_centre_x,
+away_centre_x, plus which team was nearest the ball before / after a ball gap and how far the
+ball moved during the gap. Never computed across half-time.
+
+  match       baseline  model raw  model+1s  model+2s  viterbi  macroF1  costs  pred/true poss.
+  J03WMX         0.122      0.154     0.358     0.364    0.381    0.856  15/60    321/511
+  J03WN1         0.128      0.138     0.334     0.361    0.364    0.809  15/60    310/500
+  J03WOH         0.131      0.168     0.416     0.446    0.468    0.860  15/60    276/402
+  J03WOY         0.135      0.149     0.373     0.390    0.407    0.841  15/60    297/456
+  J03WPY         0.106      0.141     0.362     0.387    0.419    0.850  15/60    291/421
+  J03WQQ         0.108      0.125     0.342     0.385    0.398    0.838  15/60    333/401
+  J03WR9         0.126      0.126     0.356     0.383    0.427    0.863  15/60    285/370
+  metrica_2      0.371      0.278     0.536     0.543    0.576    0.787  15/60    236/330
+  metrica_3      0.341      0.254     0.528     0.510    0.550    0.803  15/60    283/372
+  MEAN           0.174      0.170     0.401     0.419    0.443    0.834
+
+  Top features: ball_speed_next_50 0.23, ball_moved_in_gap_m 0.16, ball_speed_past_50 0.09,
+                dist_difference_past_50 0.07
+
+
+VITERBI SWITCH COSTS -- mean spellF1 over the 9 matches for each pair
+---------------------------------------------------------------------
+Rows = team switch cost (H<->A), columns = dead-ball switch cost (into / out of D).
+pipeline/viterbi.py uses team 30 / dead 60.
+
+  Bench 2 (18 features)                              Bench 3 (57 features)
+  team\dead   4     8    15    30    60   120   240   team\dead   4     8    15    30    60   120   240
+     4     .288  .296  .303  .307  .312  .311  .301      4     .405  .410  .412  .413  .413  .408  .399
+     8     .329  .340  .349  .354  .361  .359  .346      8     .426  .431  .433  .435  .435  .430  .421
+    15     .339  .363  .371  .374  .382  .380  .363     15     .430  .437  .440  .442  .443  .437  .428
+    30     .339  .361  .370  .374  .381  .379  .361     30     .430  .440  .438  .440  .440  .432  .422
+    60     .339  .361  .369  .347  .350  .348  .329     60     .430  .440  .432  .410  .409  .401  .388
+   120     .339  .361  .369  .345  .313  .307  .285    120     .430  .440  .432  .408  .359  .350  .337
+   240     .339  .361  .369  .345  .312  .265  .237    240     .430  .440  .432  .408  .354  .291  .275
+
+  Bench 1's best pair was also 30/60 (0.332). With 57 features every match picks 15/60, but
+  15/60 vs 30/60 is 0.443 vs 0.440 -- within noise, so viterbi.py stays at 30/60 for now.
+  Lower team costs give more possessions but not better ones: at 8/60 on bench 2 the count is
+  right (417 vs 418 true) yet spellF1 is lower (0.361) than at 15/60 (0.382).
+
+
+BAR-ATH PUBLIC 5 MINUTES -- CORRECTNESS CHECKS ONLY
+---------------------------------------------------
+RULES.md: this window may only show that the pipeline is correct; it is never used to choose
+settings, features or versions. 17 possessions only: one possession moves spellF1 ~6 points.
+Version choice is made on the benches above.
+
+                                               v1 (18 features)   v2 (57 features)
+  valid file: 199,319 rows, frames 0..199318         pass               pass
+  alignment: latency mean / median (frames)       -6.7 / -12         -0.3 / -4.5
+  right team while ball live                         0.908              0.910
+  predicted D really dead (D precision)              1.00               0.785
+  dead ball found (D recall)                         0.25               0.34
+  possessions predicted (true 17)                      11                 15
+  spellF1 / macroF1 (information only)          0.457 / 0.686      0.512 / 0.709
+  starter baseline_smooth50 on this window      0.326 spellF1
+
+  v2 labels 135 frames (~5 s) D where Athletic had the ball, hence the lower D precision.
+  To be looked at on the external matches, not on this window.
+
+
+HOW TO RE-RUN A BENCH
+---------------------
+  python pipeline/training_table.py --external <external dir> --out <table.csv>
+  python pipeline/bench.py         --data <table.csv> --results <folder outside the repo>
+  python pipeline/bench_viterbi.py --data <table.csv> --results <same folder>
+  About 15 minutes. Checked: re-running bench 3 this way gives identical files.
+
+
+WHERE THE FULL OUTPUTS ARE (outside the repository, not redistributable)
+-----------------------------------------------------------------------
+  /Volumes/T7/bundesliga and metrica data/bench_results/                       bench 1
+  /Volumes/T7/bundesliga and metrica data/bench_results/barca_style_metrica/   bench 2
+  /Volumes/T7/bundesliga and metrica data/bench_results/time_context/          bench 3
+  /Volumes/T7/bundesliga and metrica data/model/          training table + current model
+  /Volumes/T7/Barca dataset/submissions/model_viterbi_v1/ and _v2/   BAR-ATH labels files
+
+HOW TO REPRODUCE THE CURRENT SUBMISSION (v2)
+--------------------------------------------
+  python pipeline/damage.py --tracking <Metrica tracking .txt> --meta <metadata .xml> \
+      --possession <possession .csv> --barca-clean <BAR-ATH_tactical_clean.npz> --seed 1 \
+      --out <external dir>/barca_style/metrica_<n>      (once per Metrica game, 2 and 3)
+  python pipeline/training_table.py --external <external dir> --out <table.csv>
+  python pipeline/model.py train --data <table.csv> --seed 1 --out <lightgbm.txt>
+  python pipeline/submit.py --clean <BAR-ATH_tactical_clean.npz> --model <lightgbm.txt> --out <csv>
+  Training twice gives a byte-identical model (md5 70beb9d899bfe626af1b221558111a58).
+  That model is committed as models/lightgbm_v1.txt (not final), so the last step alone
+  reproduces v2 (md5 c36720f6d30b949cf1c139ac1e4421f5) without the external data.
+  Install the exact package versions first: pip install -r requirements-pipeline.txt
