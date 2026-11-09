@@ -40,6 +40,15 @@ FEATURE_COLUMNS = (
     "home_speed", "away_speed", "home_centre_x", "away_centre_x", "home_spread", "away_spread",
     "n_home", "n_away", "tracking_ok",
 )
+# Time context (model_features.add_time_context): means of these columns over the 12, 25 and 50
+# frames (0.5, 1 and 2 s) before and after each frame, plus what the ball showed around a gap.
+CONTEXT_COLUMNS = ("dist_difference", "dist_home", "dist_away", "ball_speed",
+                   "home_centre_x", "away_centre_x")
+CONTEXT_FRAMES = (12, 25, 50)
+FEATURE_COLUMNS += tuple("{}_{}_{}".format(column, side, frames)
+                         for column in CONTEXT_COLUMNS for side in ("past", "next")
+                         for frames in CONTEXT_FRAMES)
+FEATURE_COLUMNS += ("home_nearer_before_gap", "home_nearer_after_gap", "ball_moved_in_gap_m")
 
 
 def training_matrix(table):

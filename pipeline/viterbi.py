@@ -21,11 +21,8 @@ import numpy as np
 H, A, D = 0, 1, 2
 N_STATES = 3
 
-# Chosen on the external bench (7 DFL + 2 Metrica matches, with gaps), from a grid of
-# 4, 8, 15, 30, 60, 120, 240 for each: every match, with the pair picked on the other 8, chose this.
 SWITCH_COSTS = {"team": 30.0, "dead": 60.0}
 
-# Probabilities below this count as this, so one confident wrong frame can never cost infinity.
 FLOOR = 1e-6
 
 
