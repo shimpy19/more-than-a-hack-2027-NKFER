@@ -279,6 +279,18 @@ def moment_features(bx, by, ball_speed, player_speed, tracked, dist_home, dist_a
     return {name: columns[name] for name in MOMENT_COLUMNS}, anchors
 
 
+def moments_from_columns(columns, pitch, dist_home, dist_away, thresholds=None, fps=FPS):
+    """moment_features on clean.clean_match's columns (or the npz clean.py writes).
+
+    dist_home and dist_away are the ones model_features.feature_table builds, so the moments see
+    exactly the distances the model sees.
+    """
+    px = np.asarray(columns["player_x_m"], dtype=np.float64)
+    return moment_features(columns["ball_x_m"], columns["ball_y_m"], columns["ball_speed"],
+                           columns["player_speed"], ~np.isnan(px), dist_home, dist_away,
+                           columns["half"], pitch, thresholds, fps)
+
+
 # ======================================================================
 # measuring against true labels (external matches only)
 # ======================================================================

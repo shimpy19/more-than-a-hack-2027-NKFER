@@ -58,8 +58,11 @@ def halves(meta_path):
             (2, int(values["second_half_start"]) - 1, int(values["second_half_end"]) - 1)]
 
 
-def match_table(name, tracking, meta, labels_path):
-    """Features and labels for one external match."""
+def load_match(name, tracking, meta, labels_path):
+    """(clean_match columns, pitch in metres, label code per frame) for one external match.
+
+    Labels are H, A, D codes inside the halves and NO_LABEL outside them.
+    """
     team = team_of_each_track(meta)
     root = ET.parse(meta).getroot()
     pitch = (float(root.findtext(".//FieldSize/Width")), float(root.findtext(".//FieldSize/Height")))
@@ -67,17 +70,24 @@ def match_table(name, tracking, meta, labels_path):
     n_frames = len(x)
     columns, _ = clean.clean_match(x, y, ball_x, ball_y, team, pitch, FPS, halves(meta),
                                    np.zeros(n_frames), np.ones(n_frames, dtype=int))
-    table = feature_table(columns)
 
     labels = pd.read_csv(labels_path)
     if len(labels) != n_frames or (labels["frame"].to_numpy() != np.arange(n_frames)).any():
         raise ValueError(name + ": labels do not line up with the tracking frames")
     label = labels["label"].map(LABEL_CODES).to_numpy()
-    if np.isnan(label[table["half"].to_numpy() > 0]).any():
+    graded = np.asarray(columns["half"]) > 0
+    if np.isnan(label[graded]).any():
         raise ValueError(name + ": a graded frame has a label other than H, A or D")
+    codes = np.where(graded, np.nan_to_num(label, nan=NO_LABEL), NO_LABEL).astype(np.int64)
+    return columns, pitch, codes
+
+
+def match_table(name, tracking, meta, labels_path):
+    """Features and labels for one external match."""
+    columns, _, codes = load_match(name, tracking, meta, labels_path)
+    table = feature_table(columns)
     table.insert(0, "match", name)
-    table["label"] = np.where(table["half"] > 0, np.nan_to_num(label, nan=NO_LABEL),
-                              NO_LABEL).astype(np.int64)
+    table["label"] = codes
     return table
 
 
