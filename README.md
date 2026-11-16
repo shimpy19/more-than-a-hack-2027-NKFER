@@ -1,5 +1,11 @@
 # More than a Hack 2027 — Phase 1: Ball Possession
 
+> **Our submission.** To regenerate our possession file from the provided data, see
+> **[REPRODUCE.md](REPRODUCE.md)**. Our pipeline is in [`pipeline/`](pipeline/), every evaluation
+> we ran is in [`pipeline/evaluation_results.txt`](pipeline/evaluation_results.txt), and a short
+> overview is in [`pipeline/MODEL_SUMMARY.md`](pipeline/MODEL_SUMMARY.md). The rest of this README
+> is the organisers' original.
+
 **Organised by [Metrica Sports](https://metrica-sports.com), [FC Barcelona](https://www.fcbarcelona.com)
 and the [Mobile World Capital Barcelona](https://www.mwcbarcelona.com)**, at the Talent Arena in Barcelona.
 

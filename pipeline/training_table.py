@@ -2,11 +2,10 @@
 
     python pipeline/training_table.py --external <folder> --out <training table .csv>
 
-The external folder holds:
-  sportec_open_tracking/<match>/   DFL matches: tracking_with_gaps.txt, metadata.xml,
-                                   possession_with_gaps.csv
-  barca_style/metrica_<n>/         Metrica games damaged BAR-ATH style by damage.py:
-                                   tracking.txt, metadata.xml, possession.csv
+The external folder holds every training match damaged BAR-ATH style by damage.py, one folder each,
+with tracking.txt, metadata.xml and possession.csv:
+  barca_style/J03.../     the 7 DFL matches: players and ball damaged (--ball-like the Metrica copies)
+  barca_style/metrica_<n> Metrica sample games 2 and 3: players damaged, ball as recorded
 
 Each match goes through the same clean_match and feature_table as BAR-ATH. There is no
 homography for these matches, so reprojection error is 0 and every frame counts as valid.
@@ -25,7 +24,7 @@ import pandas as pd
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.dirname(HERE)]
 import clean  # noqa: E402
-from damage import read_any  # noqa: E402
+from damage import halves, read_any  # noqa: E402
 from features import ROOT  # noqa: E402
 from model_features import feature_table  # noqa: E402
 from starter.baseline import team_of_each_track  # noqa: E402
@@ -38,24 +37,13 @@ NO_LABEL = -1
 def external_matches(folder):
     """[(name, tracking, metadata, labels)] in a fixed order."""
     out = []
-    for match in sorted(glob.glob(os.path.join(folder, "sportec_open_tracking", "*"))):
-        out.append((os.path.basename(match), os.path.join(match, "tracking_with_gaps.txt"),
-                    os.path.join(match, "metadata.xml"),
-                    os.path.join(match, "possession_with_gaps.csv")))
-    for match in sorted(glob.glob(os.path.join(folder, "barca_style", "metrica_*"))):
-        out.append((os.path.basename(match), os.path.join(match, "tracking.txt"),
-                    os.path.join(match, "metadata.xml"), os.path.join(match, "possession.csv")))
+    for match in sorted(glob.glob(os.path.join(folder, "barca_style", "*"))):
+        if os.path.isdir(match):
+            out.append((os.path.basename(match), os.path.join(match, "tracking.txt"),
+                        os.path.join(match, "metadata.xml"), os.path.join(match, "possession.csv")))
     if not out:
-        raise IOError("no external matches found under " + folder)
+        raise IOError("no external matches found under " + os.path.join(folder, "barca_style"))
     return out
-
-
-def halves(meta_path):
-    """[(half, first frame, last frame)], 0-based, from the metadata's provider parameters."""
-    values = {parameter.findtext("Name"): parameter.findtext("Value")
-              for parameter in ET.parse(meta_path).getroot().iter("ProviderParameter")}
-    return [(1, int(values["first_half_start"]) - 1, int(values["first_half_end"]) - 1),
-            (2, int(values["second_half_start"]) - 1, int(values["second_half_end"]) - 1)]
 
 
 def match_table(name, tracking, meta, labels_path):

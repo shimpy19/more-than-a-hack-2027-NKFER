@@ -21,7 +21,9 @@ import numpy as np
 H, A, D = 0, 1, 2
 N_STATES = 3
 
-SWITCH_COSTS = {"team": 30.0, "dead": 60.0}
+# The best pair over the 9 external matches on the v3 bench (bench_viterbi.py; 0.637 mean spellF1,
+# with 8/30, 8/60 and 15/15 within 0.001). The old 30 / 60 scores 0.613 there.
+SWITCH_COSTS = {"team": 15.0, "dead": 30.0}
 
 FLOOR = 1e-6
 

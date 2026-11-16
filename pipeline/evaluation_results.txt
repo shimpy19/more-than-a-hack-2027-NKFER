@@ -1,7 +1,10 @@
 EVALUATION RESULTS -- every evaluation we have run so far
 ==========================================================
-Last updated 2026-11-08. Aggregate numbers only: no labels, tracking or per-frame output is kept
+Last updated 2026-11-16. Aggregate numbers only: no labels, tracking or per-frame output is kept
 in this repository (see RULES.md and .gitignore).
+
+Current submission: v3 = 90 features, trained on the BAR-ATH-style DFL copies + Metrica copies,
+Viterbi team 15 / dead 30 (models/lightgbm_v2.txt). See BENCH 4.
 
 Metrics (official code in evaluation/possession_metrics.py):
   spellF1  how well whole possessions are found: mean F1 over IoU 0.3..0.7. RANKING METRIC.
@@ -27,12 +30,18 @@ SUMMARY (mean over the 9 matches)
                                              baseline  model raw  model+2s  VITERBI  macroF1
   Bench 1  supplied gapped copies, 18 feat.     0.116      0.078     0.294    0.332    0.786
   Bench 2  BAR-ATH-style Metrica, 18 feat.      0.174      0.100     0.348    0.378    0.804
-  Bench 3  as bench 2, 57 features (current)    0.174      0.170     0.419    0.443    0.834
+  Bench 3  as bench 2, 57 features (v2)         0.174      0.170     0.419    0.443    0.834
+  Bench 3  data, 90 features                        -          -         -    0.503    0.847
+  Bench 4  new DFL copies, 90 feat. (v3)        0.317      0.336     0.562    0.632    0.890
 
-  Bench 3 beat bench 2 on all 9 matches (+0.041 to +0.099 spellF1, mean +0.065).
-  For reference, the starter baseline scores 0.2433 on the full BAR-ATH match (EVALUATION.md).
-  Bench 2's Metrica copies are easier than BAR-ATH (baseline 0.34-0.37 there), so BAR-ATH
-  probably scores somewhere between bench 1 and bench 2/3.
+  Benches 1-3 test on the DFL copies we were sent; bench 4 tests on our own BAR-ATH-style DFL
+  copies (see NEW DFL COPIES), which are easier, so bench 4 numbers are NOT comparable with
+  benches 1-3. Each step below was measured on the same test data and improved all 9 matches:
+    57 -> 90 features (bench 3 data)                      +0.060
+    old -> new DFL copies as training (bench 4 data)       +0.035
+  For reference, the starter baseline scores 0.2433 on the full BAR-ATH match (EVALUATION.md),
+  0.11-0.14 on the old DFL copies, 0.29-0.33 on the new ones and 0.34-0.37 on the Metrica copies.
+  So bench 4 is somewhat easier than BAR-ATH: expect a lower score there than 0.632.
 
 
 BENCH 1 -- the gapped copies we were sent, 18 features
@@ -85,8 +94,8 @@ loses the ball like BAR-ATH: ~59% seen).
     per frame: right team while ball live ~80-82%; dead ball labelled D 93%
 
 
-BENCH 3 -- as bench 2, with time-context features (57 features) -- CURRENT MODEL
---------------------------------------------------------------------------------
+BENCH 3 -- as bench 2, with time-context features (57 features) -- the v2 model
+-------------------------------------------------------------------------------
 New features (pipeline/model_features.py, add_time_context): means over 0.5 / 1 / 2 s before
 and after each frame of dist_difference, dist_home, dist_away, ball_speed, home_centre_x,
 away_centre_x, plus which team was nearest the ball before / after a ball gap and how far the
@@ -129,24 +138,178 @@ pipeline/viterbi.py uses team 30 / dead 60.
   right (417 vs 418 true) yet spellF1 is lower (0.361) than at 15/60 (0.382).
 
 
+CEILING TEST -- what if Viterbi knew where possession changes? (bench 3 model scores)
+------------------------------------------------------------------------------------
+The H<->A switch cost is made cheap near the TRUE change points (from the labels, with timing
+noise, missed changes and false alarms added) and left at the base cost elsewhere. An upper bound
+for a possession-change detector, not something that can be submitted.
+
+  told to Viterbi                              spellF1  short (<2 s) possessions found
+  nothing (bench 3)                              0.443     7%
+  true team changes, exact                       0.565    21%
+  true changes, timing +/-0.25 / 0.5 / 1 s       0.555 / 0.552 / 0.508
+  +/-0.5 s, half the changes missed              0.486
+  +/-0.5 s, half the alarms false                0.527
+  +/-0.5 s, recall 70%, precision 50%            0.493
+  team changes + dead-ball boundaries, exact     0.576    23%
+
+  A detector is worth building; recall matters more than precision; +/-0.5 s timing is enough.
+  Even with exact changes only 21% of short possessions are found: during them the model believes
+  the wrong team has the ball, so it also needs faster-reacting features (-> TOUCH FEATURES).
+
+
+TOUCH FEATURES -- 57 -> 90 features (bench 3 data, leave one match out, fair costs)
+-----------------------------------------------------------------------------------
+33 short-window features (model_features.add_touch_features, over 2 / 4 / 8 frames): ball
+turning and speeding up, ball speed towards a goal, nearest player and team and whether they
+change, closest home / away player around the frame.
+
+  match       57 feat.  90 feat.  90 feat. + detector
+  J03WMX         0.381     0.451     0.490
+  J03WN1         0.364     0.425     0.447
+  J03WOH         0.468     0.514     0.550
+  J03WOY         0.407     0.466     0.511
+  J03WPY         0.419     0.470     0.474
+  J03WQQ         0.398     0.475     0.484
+  J03WR9         0.427     0.471     0.520
+  metrica_2      0.576     0.640     0.671
+  metrica_3      0.550     0.611     0.681
+  MEAN           0.443     0.503     0.536     macroF1 0.834 / 0.847 / 0.855
+  short (<2 s) possessions found: 7% / 14% / 20%
+
+  Touch features take 14.5% of the model's gain (min_dist_away_8, min_dist_home_8,
+  ball_attack_v_2 most).
+
+  Overtraining check (Viterbi 15/60): score on the matches it was trained on vs held out
+                  trained-on   held-out   gap
+    57 features      0.567      0.443     0.124
+    90 features      0.630      0.503     0.127     -> the extra features add no overfitting
+
+
+POSSESSION-CHANGE DETECTOR -- tested, NOT used in the submission
+----------------------------------------------------------------
+A second LightGBM gives, per frame, P(change to H), P(change to A), P(no change) within +/- 6
+frames; Viterbi's H<->A cost at each frame comes from it (cheap where it fires, base cost
+elsewhere). Same leave-one-match-out bench, costs chosen fairly.
+  On its own (bench 3 data, threshold 0.5): finds 52% of team changes within +/- 0.5 s, 38% of
+  its alarms are real, the new team is right 86% of the time.
+  spellF1: 0.443 -> 0.487 on the 57-feature model, 0.503 -> 0.536 on the 90-feature model,
+  0.634 -> 0.675 on the 90-feature model with the new DFL copies (bench 4 data; all 9 matches
+  better, +0.030 to +0.068).
+  Why it is held back: on the full BAR-ATH match (no labels used) it behaves differently than on
+  the test matches. Trained on the old DFL copies it fired 1.5 times a minute on BAR-ATH vs
+  3.8-5.3 elsewhere. With the new DFL copies it fires 4.6 vs 5.8-6.1, but it removes 24% of the
+  possessions on BAR-ATH (3.90 -> 2.97 per minute) vs 7% on the test matches (3.70 -> 3.44).
+  Without labels we cannot tell whether BAR-ATH really has fewer possessions or the detector
+  misses changes there, so the submission does not use it.
+
+
+DOES BAR-ATH LOOK LIKE THE TRAINING DATA? (no labels used)
+----------------------------------------------------------
+For each of the 90 features, the distance (KS) between BAR-ATH and the external matches vs the
+distance between each external match and the rest: no feature is further from the external
+matches than they are from each other. Match by match:
+  - ball speed and speed towards a goal: BAR-ATH is close to the Metrica copies (KS 0.03-0.15),
+    far from the old DFL copies (0.4-0.5)
+  - ball turning: BAR-ATH (median 1.5 deg over 2 frames) sits between the smooth Metrica ball
+    (0.06-0.23) and the DFL ball (1.8-3.1)
+  - players: BAR-ATH tracks 22 (median), the nearest player is 1.9 m from the ball; the old DFL
+    copies tracked 12-13 and the nearest player was 4.6 m away
+
+  Why the detector was quiet on BAR-ATH (retrained leaving one feature group out at a time):
+    left out                   bench spellF1   alarms/min  DFL   Metrica   BAR-ATH
+    nothing                        0.536                   4.4     4.9       1.5
+    ball turning                   0.546                   4.2     4.9       1.7
+    ball-gap features              0.542                   4.4     4.8       1.6
+    player distances               0.534                   4.8     6.1       3.7
+  -> the player distances, i.e. the old DFL copies missing ~40% of the players.
+
+  Training data, scored on the held-out Metrica matches (90 features, plain Viterbi):
+    all other 8 0.625 | DFL only 0.572 | the other Metrica only 0.641 | Metrica weighted 0.640
+
+
+NEW DFL COPIES -- the DFL matches damaged BAR-ATH style by damage.py (--ball-like)
+---------------------------------------------------------------------------------
+The old copies (tracking_with_gaps, made by a teammate) hide ~40% of the players and drop the
+ball at random, as often in live play as in dead ball. The new copies start from the complete
+DFL originals: the ball's seen / missing pattern is copied from the Metrica copies by live / dead
+stretch, then players are hidden with BAR-ATH's profile, as for Metrica.
+
+                      players  nearest   ball   ball still   ball seen when
+                      tracked  player    seen   (of seen)    dead / live
+  BAR-ATH                22    1.9 m     59%       3%          ?
+  DFL, new copies     20-21    1.5-1.7   51-58%   8-15%       7-14% / 81-92%
+  DFL, old copies     12-13    4.6 m     57-61%  44-51%      56-63% / 59%
+  Metrica copies      21-22    0.3-1.3   59-68%   1-2%       10-15% / 82-89%
+
+  Old vs new DFL copies as TRAINING data, both scored on the same test data (new DFL copies +
+  Metrica), 90 features, leave one match out, fair costs:
+                   plain Viterbi   + detector
+    old copies         0.599         0.615
+    new copies         0.634         0.675     all 9 matches better (plain +0.014 to +0.053);
+                                               the Metrica matches, whose test data did not
+                                               change, gain +0.033
+  On BAR-ATH the detector now fires 4.6 times a minute (was 1.5), and the plain model predicts
+  as many possessions per minute as on the test matches (see BENCH 4).
+  Remaining differences: the DFL ball is still more often than BAR-ATH's and turns more
+  sharply; and the "lost while dead" pattern is copied from Metrica (same provider as BAR-ATH),
+  which cannot be checked on BAR-ATH without labels.
+
+
+BENCH 4 -- new DFL copies + Metrica copies, 90 features -- CURRENT MODEL (v3)
+---------------------------------------------------------------------------
+Run from the repository: training_table.py -> bench.py -> bench_viterbi.py.
+
+  match       baseline  model raw  model+1s  model+2s  viterbi  macroF1  costs  pred/true poss.
+  J03WMX         0.301      0.338     0.570     0.525    0.604    0.910   8/30    403/511
+  J03WN1         0.292      0.347     0.592     0.535    0.610    0.902  15/15    358/500
+  J03WOH         0.330      0.345     0.631     0.579    0.665    0.927   8/30    349/402
+  J03WOY         0.286      0.342     0.579     0.530    0.612    0.900  15/30    350/456
+  J03WPY         0.297      0.313     0.585     0.538    0.604    0.904  15/30    314/421
+  J03WQQ         0.321      0.317     0.591     0.567    0.605    0.872   8/30    369/401
+  J03WR9         0.310      0.349     0.645     0.588    0.667    0.927  15/30    288/370
+  metrica_2      0.371      0.343     0.645     0.611    0.661    0.825   8/30    313/330
+  metrica_3      0.341      0.327     0.630     0.587    0.664    0.842  15/30    314/372
+  MEAN           0.317      0.336     0.607     0.562    0.632    0.890
+
+  Top features: ball_speed 0.27, dist_difference_past_50 0.26, ball_moved_in_gap_m 0.09,
+                ball_speed_next_50 0.04, ball_attack_v_2 0.04
+
+  Viterbi costs, mean spellF1 over the 9 matches (rows team, columns dead):
+  team\dead   4     8    15    30    60   120   240
+     4     .619  .621  .623  .625  .625  .623  .614
+     8     .631  .633  .636  .637  .637  .636  .626
+    15     .634  .633  .637  .637  .636  .634  .625
+    30     .634  .631  .612  .613  .613  .610  .599
+    60     .634  .631  .604  .551  .548  .544  .530
+   120     .634  .631  .604  .545  .471  .467  .449
+   240     .634  .631  .604  .545  .467  .384  .364
+  viterbi.py uses the best pair, team 15 / dead 30 (8/30, 8/60 and 15/15 are within 0.001).
+
+  Full BAR-ATH match, no labels used: v3 predicts 3.53 possessions per minute, the same model on
+  the held-out test matches 3.57 (true there: 4.38).
+
+
 BAR-ATH PUBLIC 5 MINUTES -- CORRECTNESS CHECKS ONLY
 ---------------------------------------------------
 RULES.md: this window may only show that the pipeline is correct; it is never used to choose
 settings, features or versions. 17 possessions only: one possession moves spellF1 ~6 points.
 Version choice is made on the benches above.
 
-                                               v1 (18 features)   v2 (57 features)
-  valid file: 199,319 rows, frames 0..199318         pass               pass
-  alignment: latency mean / median (frames)       -6.7 / -12         -0.3 / -4.5
-  right team while ball live                         0.908              0.910
-  predicted D really dead (D precision)              1.00               0.785
-  dead ball found (D recall)                         0.25               0.34
-  possessions predicted (true 17)                      11                 15
-  spellF1 / macroF1 (information only)          0.457 / 0.686      0.512 / 0.709
+                                          v1 (18 feat.)   v2 (57 feat.)   v3 (90 feat., new DFL)
+  valid file: 199,319 rows, frames 0..199318       pass           pass            pass
+  alignment: latency mean / median (frames)     -6.7 / -12     -0.3 / -4.5     -4.2 / -6.0
+  right team while ball live (*)                   0.908          0.910           0.926
+  predicted D really dead (D precision)            1.00           0.785           0.762
+  dead ball found (D recall)                       0.25           0.34            0.34
+  possessions predicted (true 17)                    11             15              20
+  spellF1 / macroF1 (information only)        0.457 / 0.686  0.512 / 0.709   0.595 / 0.732
   starter baseline_smooth50 on this window      0.326 spellF1
+  (*) v1 / v2 as first reported; with the scorer's team_acc_gt_alive v2 is 0.890.
 
   v2 labels 135 frames (~5 s) D where Athletic had the ball, hence the lower D precision.
-  To be looked at on the external matches, not on this window.
+  To be looked at on the external matches, not on this window. Every version misses the same
+  dead-ball stretches here (D recall 0.34).
 
 
 HOW TO RE-RUN A BENCH
@@ -154,7 +317,9 @@ HOW TO RE-RUN A BENCH
   python pipeline/training_table.py --external <external dir> --out <table.csv>
   python pipeline/bench.py         --data <table.csv> --results <folder outside the repo>
   python pipeline/bench_viterbi.py --data <table.csv> --results <same folder>
-  About 15 minutes. Checked: re-running bench 3 this way gives identical files.
+  About 15 minutes. Checked: re-running bench 3 this way gives identical files. Bench 4 was run
+  this way from the repository, on the same training table as the experiments (identical
+  features and labels), and reproduces their result (0.632 here; 0.634 with a smaller cost grid).
 
 
 WHERE THE FULL OUTPUTS ARE (outside the repository, not redistributable)
@@ -162,18 +327,22 @@ WHERE THE FULL OUTPUTS ARE (outside the repository, not redistributable)
   /Volumes/T7/bundesliga and metrica data/bench_results/                       bench 1
   /Volumes/T7/bundesliga and metrica data/bench_results/barca_style_metrica/   bench 2
   /Volumes/T7/bundesliga and metrica data/bench_results/time_context/          bench 3
-  /Volumes/T7/bundesliga and metrica data/model/          training table + current model
-  /Volumes/T7/Barca dataset/submissions/model_viterbi_v1/ and _v2/   BAR-ATH labels files
+  /Volumes/T7/bundesliga and metrica data/bench_results/v3/                    bench 4
+  /Volumes/T7/bundesliga and metrica data/model/      bench 3 training table (v2)
+  /Volumes/T7/bundesliga and metrica data/model_v3/   bench 4 training table (v3)
+  /Volumes/T7/bundesliga and metrica data/barca_style/  all 9 damaged training matches
+  /Volumes/T7/Barca dataset/submissions/model_viterbi_v1/, _v2/, _v3/   BAR-ATH labels files
+  The ceiling test, the detector and the diagnostics above were run with one-off scripts that
+  are not in the repository; only their aggregate results are kept here.
 
-HOW TO REPRODUCE THE CURRENT SUBMISSION (v2)
+HOW TO REPRODUCE THE CURRENT SUBMISSION (v3)
 --------------------------------------------
-  python pipeline/damage.py --tracking <Metrica tracking .txt> --meta <metadata .xml> \
-      --possession <possession .csv> --barca-clean <BAR-ATH_tactical_clean.npz> --seed 1 \
-      --out <external dir>/barca_style/metrica_<n>      (once per Metrica game, 2 and 3)
-  python pipeline/training_table.py --external <external dir> --out <table.csv>
-  python pipeline/model.py train --data <table.csv> --seed 1 --out <lightgbm.txt>
-  python pipeline/submit.py --clean <BAR-ATH_tactical_clean.npz> --model <lightgbm.txt> --out <csv>
-  Training twice gives a byte-identical model (md5 70beb9d899bfe626af1b221558111a58).
-  That model is committed as models/lightgbm_v1.txt (not final), so the last step alone
-  reproduces v2 (md5 c36720f6d30b949cf1c139ac1e4421f5) without the external data.
-  Install the exact package versions first: pip install -r requirements-pipeline.txt
+  See REPRODUCE.md. In short, with the exact package versions (requirements-pipeline.txt):
+  python pipeline/clean.py --data-root <match data> --out <work>/cleaned
+  python pipeline/submit.py --clean <work>/cleaned/BAR-ATH_tactical_clean.npz \
+      --model models/lightgbm_v2.txt --out <work>/<team_name>.csv
+  -> md5 cad9aed887ab27f6d4f7b11de3d69c84. Retraining from the external matches (REPRODUCE.md)
+  gives the same model, models/lightgbm_v2.txt (md5 ab751e12a8b0c62900dceb5e7346c4ed); training
+  twice gives a byte-identical model.
+  v2 (md5 c36720f6d30b949cf1c139ac1e4421f5) is reproduced by commit 8623a29 with its own
+  models/lightgbm_v1.txt.
