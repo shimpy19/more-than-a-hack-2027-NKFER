@@ -49,6 +49,16 @@ FEATURE_COLUMNS += tuple("{}_{}_{}".format(column, side, frames)
                          for column in CONTEXT_COLUMNS for side in ("past", "next")
                          for frames in CONTEXT_FRAMES)
 FEATURE_COLUMNS += ("home_nearer_before_gap", "home_nearer_after_gap", "ball_moved_in_gap_m")
+# Touch features (model_features.add_touch_features): what happens in the few frames around each
+# one -- the ball turning or speeding up, the nearest player or team changing -- over 2, 4 and 8
+# frames (0.08 to 0.32 s), short enough to see a single touch that the averages above smooth away.
+TOUCH_FRAMES = (2, 4, 8)
+TOUCH_COLUMNS = ("nearest_distance", "nearest_team")
+TOUCH_COLUMNS += tuple("{}_{}".format(name, frames) for frames in TOUCH_FRAMES for name in (
+    "dd_shift", "near_team_past", "near_team_next", "near_team_shift", "ball_speed_change",
+    "ball_turn", "ball_attack_v", "near_player_changed", "near_team_changed"))
+TOUCH_COLUMNS += ("min_dist_home_4", "min_dist_away_4", "min_dist_home_8", "min_dist_away_8")
+FEATURE_COLUMNS += TOUCH_COLUMNS
 
 
 def training_matrix(table):
