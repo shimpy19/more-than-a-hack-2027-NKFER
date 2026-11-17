@@ -18,6 +18,7 @@ import pandas as pd
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.dirname(HERE)]
 from model import CONTEXT_COLUMNS, CONTEXT_FRAMES, FEATURE_COLUMNS  # noqa: E402
+from rules_touch import TOUCH_COLUMNS, touch_features  # noqa: E402
 from starter.baseline import AWAY, HOME  # noqa: E402
 
 
@@ -120,6 +121,9 @@ def feature_table(columns):
         "tracking_ok": columns["tracking_ok"],
     })
     table = add_time_context(table, bx, by)
+    touch = touch_features(bx, by, table["half"].to_numpy(), dist_home, dist_away)
+    table = pd.concat([table, pd.DataFrame({name: touch[name] for name in TOUCH_COLUMNS},
+                                           index=table.index)], axis=1)
     missing = [name for name in FEATURE_COLUMNS if name not in table.columns]
     if missing:
         raise ValueError("feature_table does not build: {}".format(missing))

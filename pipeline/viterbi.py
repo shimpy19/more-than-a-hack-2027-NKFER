@@ -21,7 +21,7 @@ import numpy as np
 H, A, D = 0, 1, 2
 N_STATES = 3
 
-SWITCH_COSTS = {"team": 30.0, "dead": 60.0}
+SWITCH_COSTS = {"team": 8.0, "dead": 30.0}
 
 FLOOR = 1e-6
 

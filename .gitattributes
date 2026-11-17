@@ -1,0 +1,2 @@
+# Saved models are read byte for byte by LightGBM; never convert their line endings.
+models/** -text

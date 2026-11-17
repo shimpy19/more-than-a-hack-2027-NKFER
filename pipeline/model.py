@@ -15,6 +15,7 @@ file, so producing the submission never retrains.
 
 import argparse
 import json
+import os
 
 import lightgbm as lgb
 import numpy as np
@@ -49,6 +50,15 @@ FEATURE_COLUMNS += tuple("{}_{}_{}".format(column, side, frames)
                          for column in CONTEXT_COLUMNS for side in ("past", "next")
                          for frames in CONTEXT_FRAMES)
 FEATURE_COLUMNS += ("home_nearer_before_gap", "home_nearer_after_gap", "ball_moved_in_gap_m")
+
+# Ball touches (rules_touch.py): who touched last / touches next. On by default (lightgbm_v2);
+# NKFER_TOUCH=0 turns them off, so the model without them (lightgbm_v1) can always be rebuilt
+# exactly. save() records FEATURE_COLUMNS and load() refuses a model built with the other setting.
+from rules_touch import TOUCH_COLUMNS  # noqa: E402
+
+USE_TOUCH = os.environ.get("NKFER_TOUCH", "1") == "1"
+if USE_TOUCH:
+    FEATURE_COLUMNS += TOUCH_COLUMNS
 
 
 def training_matrix(table):

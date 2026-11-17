@@ -3,6 +3,33 @@
 Short overview for the team, as of 2026-11-09. Full numbers are in
 [evaluation_results.txt](evaluation_results.txt).
 
+## Update 2026-11-16: model v2 (spellF1 0.623)
+
+| What changed | Where |
+|---|---|
+| 16 **ball-touch features**: who touched the ball last / touches it next, how long ago, duels, control time (on by default; `NKFER_TOUCH=0` gives v1 back) | `rules_touch.py`, `model_features.py`, `model.py` |
+| **Trained on hybrid DFL matches**: every player from `tracking.txt`, the ball (with its gaps) from `tracking_with_gaps.txt`. with_gaps shows ~13 players, BAR-ATH ~20.5. | `make_hybrid.py` |
+| **Viterbi costs team 8 / dead 30** (was 30/60) | `viterbi.py` |
+| The trained model | `models/lightgbm_v2.txt` |
+
+Bench on the 7 DFL matches, leave one match out, costs chosen on the other matches:
+
+| Version | with_gaps spellF1 / macroF1 | hybrid spellF1 / macroF1 |
+|---|---|---|
+| Starter baseline | 0.122 / 0.361 | 0.203 / 0.441 |
+| v1 (57 features, 30/60) | 0.411 / 0.848 | 0.506 / 0.89 |
+| **v2 (73 features, 8/30)** | **0.461 / 0.865** | **0.623 / 0.910** |
+
+Rebuilding v2:
+```
+python pipeline/make_hybrid.py     --external <external dir> --out <hybrid dir>
+python pipeline/training_table.py  --external <hybrid dir> --out <table.csv>
+python pipeline/model.py train     --data <table.csv> --out models/lightgbm_v2.txt
+python pipeline/submit.py          --clean <BAR-ATH_tactical_clean.npz> --model models/lightgbm_v2.txt --out <csv>
+```
+Every decision and its numbers are in `docs/decisions_log.md`. The rest of this page describes
+v1 and is kept as history.
+
 ## What we built
 
 ```
