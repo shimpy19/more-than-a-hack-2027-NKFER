@@ -4,11 +4,12 @@ Running the steps below on the provided match data regenerates our possession fi
 byte**:
 
 ```
-md5  cad9aed887ab27f6d4f7b11de3d69c84   <team_name>.csv
+md5  9afc4c4ff4a629777d5da82058595712   <team_name>.csv
 ```
 
-The model is committed (`models/lightgbm_v2.txt`), so making the file trains nothing. Section 4
-retrains that model from the external matches, if you want to check it too.
+Both models are committed (`models/lightgbm_v2.txt` and `models/detector_v1.txt`), so making the
+file trains nothing. Section 4 retrains them from the external matches, if you want to check them
+too.
 
 ## 1. Install
 
@@ -19,6 +20,16 @@ change a probability in its last digits, and that can move a decision by one fra
 python3.13 -m venv .venv
 .venv/bin/python -m pip install -r requirements-pipeline.txt
 ```
+
+**On macOS**, LightGBM also needs the OpenMP runtime, which its package does not include. Install it
+first, or `import lightgbm` fails with "Library not loaded: libomp.dylib":
+
+```bash
+brew install libomp
+```
+
+Linux and Windows need nothing extra. The file was regenerated and checked byte for byte on macOS
+(Apple Silicon, Python 3.13.12).
 
 ## 2. The match data
 
@@ -35,17 +46,25 @@ needs by name anywhere under the folder you give it:
 ```bash
 .venv/bin/python pipeline/clean.py --data-root <bundle folder> --out <work>/cleaned
 .venv/bin/python pipeline/submit.py --clean <work>/cleaned/BAR-ATH_tactical_clean.npz \
-    --model models/lightgbm_v2.txt --out <work>/<team_name>.csv
+    --model models/lightgbm_v2.txt --detector models/detector_v1.txt \
+    --out <work>/<team_name>.csv
 .venv/bin/python evaluation/validate_submission.py <work>/<team_name>.csv
 md5 <work>/<team_name>.csv        # md5sum on Linux
 ```
 
 What each step does:
 1. **`clean.py`** cleans the tracking. It removes impossible player positions and duplicates, cuts identity switches, recomputes speeds and flags suspect ball positions.
-2. **`submit.py`** computes the 90 features per frame (`model_features.py`) and gets H / A / D probabilities from the LightGBM model (`model.py`).
-3. **Viterbi** (`viterbi.py`, team 15 / dead 30) then turns those probabilities into steady possessions. Frames outside the two halves are `X`.
+2. **`submit.py`** computes the 90 features per frame (`model_features.py`). From them it gets two sets of probabilities:
+   - H / A / D per frame from the main model (`model.py`);
+   - "possession changes to H / to A here" from the possession-change detector (`detector.py`).
+3. **Viterbi** (`viterbi.py`) turns the probabilities into steady possessions:
+   - switching team is cheap where the detector expects a change and expensive elsewhere (`detector.SETTING`);
+   - entering or leaving a dead ball costs 30;
+   - frames outside the two halves are `X`.
 
-## 4. Optional: retrain the model
+Without `--detector`, the same command gives the previous version, v3, which uses fixed costs (team 15 / dead 30): md5 `cad9aed887ab27f6d4f7b11de3d69c84`.
+
+## 4. Optional: retrain the models
 
 This needs the external matches, which are match data and not in this repository. Each match is
 one folder with `tracking.txt`, `metadata.xml` (Metrica text format) and `possession.csv`
@@ -73,7 +92,7 @@ do:
     --seed 1 --out <external>/barca_style/<J03..>
 ```
 
-**Then the training table and the model:**
+**Then the main model**, from the training table:
 
 ```bash
 .venv/bin/python pipeline/training_table.py --external <external> --out <work>/training_table.csv
@@ -82,23 +101,39 @@ do:
 # md5 ab751e12a8b0c62900dceb5e7346c4ed, the same as models/lightgbm_v2.txt
 ```
 
-`damage.py` reads BAR-ATH's cleaned tracking. It only measures how many players go missing and
-when the ball is missing. It never reads a label, and nothing it measures is written anywhere.
+**Then the detector**, from a second table where each match's ball is smoothed like BAR-ATH's
+(Gaussian, 6 frames, inside each stretch where the ball is seen):
+
+```bash
+.venv/bin/python pipeline/training_table.py --external <external> --smooth-ball 6 \
+    --out <work>/training_table_smooth.csv
+.venv/bin/python pipeline/detector.py train --data <work>/training_table_smooth.csv \
+    --out <work>/detector.txt
+# md5 ececd6b3613c84b2439793dc8b99be7d, the same as models/detector_v1.txt
+```
+
+Two scripts read BAR-ATH's cleaned tracking, and neither ever reads a label:
+- **`damage.py`** measures how many players go missing and when the ball is missing. Nothing it measures is written anywhere.
+- **The smoothing width (6 frames)** was chosen so that the training balls' velocity changes look like BAR-ATH's.
+
 No BAR-ATH label is used for training or for choosing any setting. The public 5 minutes were
 used only to check that the file is correct.
 
-## 5. Optional: the bench
+## 5. Optional: the benches
 
-The bench scores each external match with a model trained on the other 8:
+Each external match is scored with models trained on the other 8:
 
 ```bash
+# the main model with fixed costs (v3): spellF1 0.632, macroF1 0.890
 .venv/bin/python pipeline/bench.py --data <work>/training_table.csv --results <folder>
 .venv/bin/python pipeline/bench_viterbi.py --data <work>/training_table.csv --results <folder>
+# with the detector, on the matches with a BAR-ATH-like smoothed ball: 0.609 -> 0.638
+.venv/bin/python pipeline/bench_detector.py --data <work>/training_table.csv \
+    --smooth-data <work>/training_table_smooth.csv --results <another folder>
 ```
 
-Expected result: mean spellF1 0.632, macroF1 0.890. All results are in
-[pipeline/evaluation_results.txt](pipeline/evaluation_results.txt), and a short overview is in
-[pipeline/MODEL_SUMMARY.md](pipeline/MODEL_SUMMARY.md).
+All results are in [pipeline/evaluation_results.txt](pipeline/evaluation_results.txt), and a
+short overview is in [pipeline/MODEL_SUMMARY.md](pipeline/MODEL_SUMMARY.md).
 
 ## Tests
 
