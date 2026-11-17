@@ -1,10 +1,12 @@
 EVALUATION RESULTS -- every evaluation we have run so far
 ==========================================================
-Last updated 2026-11-16. Aggregate numbers only: no labels, tracking or per-frame output is kept
+Last updated 2026-11-17. Aggregate numbers only: no labels, tracking or per-frame output is kept
 in this repository (see RULES.md and .gitignore).
 
-Current submission: v3 = 90 features, trained on the BAR-ATH-style DFL copies + Metrica copies,
-Viterbi team 15 / dead 30 (models/lightgbm_v2.txt). See BENCH 4.
+Current submission: v4 = v3 + the possession-change detector. v3 is 90 features, trained on the
+BAR-ATH-style DFL copies + Metrica copies (models/lightgbm_v2.txt). The detector
+(models/detector_v1.txt) is trained on the same matches with their ball smoothed like BAR-ATH's,
+and sets Viterbi's team-switch cost per frame. See BENCH 4 and BENCH 5.
 
 Metrics (official code in evaluation/possession_metrics.py):
   spellF1  how well whole possessions are found: mean F1 over IoU 0.3..0.7. RANKING METRIC.
@@ -33,12 +35,16 @@ SUMMARY (mean over the 9 matches)
   Bench 3  as bench 2, 57 features (v2)         0.174      0.170     0.419    0.443    0.834
   Bench 3  data, 90 features                        -          -         -    0.503    0.847
   Bench 4  new DFL copies, 90 feat. (v3)        0.317      0.336     0.562    0.632    0.890
+  Bench 5  as bench 4, ball smoothed, v3            -          -         -    0.609    0.881
+  Bench 5  v3 + detector (v4)                       -          -         -    0.638    0.887
 
   Benches 1-3 test on the DFL copies we were sent; bench 4 tests on our own BAR-ATH-style DFL
   copies (see NEW DFL COPIES), which are easier, so bench 4 numbers are NOT comparable with
-  benches 1-3. Each step below was measured on the same test data and improved all 9 matches:
+  benches 1-3. Bench 5 tests on the bench 4 matches with their ball smoothed like BAR-ATH's (see
+  SMOOTHED BALL). Each step below was measured on the same test data and improved all 9 matches:
     57 -> 90 features (bench 3 data)                      +0.060
     old -> new DFL copies as training (bench 4 data)       +0.035
+    v3 -> v3 + detector trained on smoothed balls (bench 5) +0.029
   For reference, the starter baseline scores 0.2433 on the full BAR-ATH match (EVALUATION.md),
   0.11-0.14 on the old DFL copies, 0.29-0.33 on the new ones and 0.34-0.37 on the Metrica copies.
   So bench 4 is somewhat easier than BAR-ATH: expect a lower score there than 0.632.
@@ -186,8 +192,9 @@ change, closest home / away player around the frame.
     90 features      0.630      0.503     0.127     -> the extra features add no overfitting
 
 
-POSSESSION-CHANGE DETECTOR -- tested, NOT used in the submission
-----------------------------------------------------------------
+POSSESSION-CHANGE DETECTOR, first version -- trained on the original balls, NOT used
+------------------------------------------------------------------------------------
+(The detector in the submission is trained on smoothed balls instead; see BENCH 5.)
 A second LightGBM gives, per frame, P(change to H), P(change to A), P(no change) within +/- 6
 frames; Viterbi's H<->A cost at each frame comes from it (cheap where it fires, base cost
 elsewhere). Same leave-one-match-out bench, costs chosen fairly.
@@ -290,22 +297,77 @@ Run from the repository: training_table.py -> bench.py -> bench_viterbi.py.
   the held-out test matches 3.57 (true there: 4.38).
 
 
+SMOOTHED BALL -- BAR-ATH's ball is smoother than the training matches' (no labels used)
+-------------------------------------------------------------------------------------
+BAR-ATH's ball comes from video tracking: kicks do not show as sharp velocity jumps. Velocity
+change over 2 frames (m/s), and touches as nikozirdum's detector (PR #5) finds them:
+                          p50    p90    p99    jumps >= 2 m/s /min   touches /min
+  BAR-ATH                0.45   1.46   2.94          31.8                0.66
+  training, original     0.02-0.56  0.4-5.3  12-17   66-151              20-33
+  training, sigma 6      0.27-0.40  1.3-1.6  2.7-3.0 31-43               0.5-1.8
+training_table.py --smooth-ball 6 smooths each match's ball with a Gaussian of 6 frames inside each
+seen stretch (never across a gap), before cleaning. Sigma 6 is the best fit for all 9 matches
+(chosen on BAR-ATH's tracking only).
+
+  nikozirdum's 16 touch features (PR #5) on top of our 90, leave one match out:
+    original balls (bench 4 data)                          0.632 -> 0.726  (+0.094, 9 of 9)
+    tested on smoothed balls, trained on smoothed balls    0.617 -> 0.606  (-0.011, 2 of 9)
+    tested on smoothed balls, trained on original balls    0.609 -> 0.536  (-0.073, 0 of 9)
+  On BAR-ATH their touch detector fires 0.7 times a minute (20-33 on the training matches):
+  the +0.094 needs a sharp ball that BAR-ATH does not have. Not used.
+  Smoothing the main model's training ball: 0.609 -> 0.617 (+0.008, noise). Not used.
+
+
+BENCH 5 -- detector trained on smoothed balls -- CURRENT SUBMISSION (v4)
+------------------------------------------------------------------------
+Test data: the bench 4 matches with smoothed balls (BAR-ATH-like). Main model as v3 (trained on
+the other matches' original balls); detector trained on the other matches' smoothed balls
+(detector.py, bench_detector.py). Settings chosen on the other 8 matches.
+
+  match       v3 (plain)  v3 + detector   alarms/min
+  J03WMX         0.556       0.623          5.96
+  J03WN1         0.606       0.634          6.93
+  J03WOH         0.628       0.670          5.98
+  J03WOY         0.583       0.594          6.21
+  J03WPY         0.563       0.608          5.44
+  J03WQQ         0.603       0.619          6.24
+  J03WR9         0.640       0.665          5.22
+  metrica_2      0.652       0.658          6.26
+  metrica_3      0.651       0.676          7.39
+  MEAN           0.609       0.638          (+0.029, better on 9 of 9; macroF1 0.881 -> 0.887)
+
+  Best plain costs on these matches: team 15 / dead 30 (as v3). Best detector setting over all
+  matches (detector.SETTING): into H costs 0 + 120 * (1 - P(change to H))^4, the same for A,
+  dead 30. Possessions predicted: +2.6% with the detector. Transition timing unchanged (mean
+  latency 0.38 frames plain, 0.41 with the detector).
+  For comparison, the first detector (trained on original balls) gains only +0.010 (6 of 9) here
+  and fires 4.6 times a minute, as on BAR-ATH: its behaviour on BAR-ATH came from the smooth ball.
+
+  Full BAR-ATH match, no labels used:
+    detector alarms per minute       5.76   (test matches 5.22-7.39, mean 6.18)
+    possessions per minute (v4)      3.38   (test matches 3.46, ratio 0.98)
+    possessions v3 -> v4             374 -> 358 (-4.3%; test matches +2.6%)
+
+
 BAR-ATH PUBLIC 5 MINUTES -- CORRECTNESS CHECKS ONLY
 ---------------------------------------------------
 RULES.md: this window may only show that the pipeline is correct; it is never used to choose
 settings, features or versions. 17 possessions only: one possession moves spellF1 ~6 points.
 Version choice is made on the benches above.
 
-                                          v1 (18 feat.)   v2 (57 feat.)   v3 (90 feat., new DFL)
-  valid file: 199,319 rows, frames 0..199318       pass           pass            pass
-  alignment: latency mean / median (frames)     -6.7 / -12     -0.3 / -4.5     -4.2 / -6.0
-  right team while ball live (*)                   0.908          0.910           0.926
-  predicted D really dead (D precision)            1.00           0.785           0.762
-  dead ball found (D recall)                       0.25           0.34            0.34
-  possessions predicted (true 17)                    11             15              20
-  spellF1 / macroF1 (information only)        0.457 / 0.686  0.512 / 0.709   0.595 / 0.732
+                                          v1 (18 feat.)  v2 (57 feat.)  v3 (90, new DFL)  v4 (v3 + det.)
+  valid file: 199,319 rows, frames 0..199318       pass          pass           pass            pass
+  alignment: latency mean / median (frames)     -6.7 / -12    -0.3 / -4.5    -4.2 / -6.0    -6.7 / -10
+  right team while ball live (*)                   0.908         0.910          0.926          0.922
+  predicted D really dead (D precision)            1.00          0.785          0.762          0.778
+  dead ball found (D recall)                       0.25          0.34           0.34           0.34
+  possessions predicted (true 17)                    11            15             20             21
+  spellF1 / macroF1 (information only)        0.457 / 0.686 0.512 / 0.709  0.595 / 0.732  0.537 / 0.730
   starter baseline_smooth50 on this window      0.326 spellF1
   (*) v1 / v2 as first reported; with the scorer's team_acc_gt_alive v2 is 0.890.
+  v3 vs v4 here is about one possession (one possession moves spellF1 ~6 points); the version
+  was chosen on bench 5, not here. Both predict changes a few frames early on this window, while
+  on the benches the median latency is 0 for both.
 
   v2 labels 135 frames (~5 s) D where Athletic had the ball, hence the lower D precision.
   To be looked at on the external matches, not on this window. Every version misses the same
@@ -328,21 +390,25 @@ WHERE THE FULL OUTPUTS ARE (outside the repository, not redistributable)
   /Volumes/T7/bundesliga and metrica data/bench_results/barca_style_metrica/   bench 2
   /Volumes/T7/bundesliga and metrica data/bench_results/time_context/          bench 3
   /Volumes/T7/bundesliga and metrica data/bench_results/v3/                    bench 4
+  /Volumes/T7/bundesliga and metrica data/bench_results/v4_detector/           bench 5
   /Volumes/T7/bundesliga and metrica data/model/      bench 3 training table (v2)
   /Volumes/T7/bundesliga and metrica data/model_v3/   bench 4 training table (v3)
+  /Volumes/T7/bundesliga and metrica data/model_v4/   smoothed-ball training table (detector)
   /Volumes/T7/bundesliga and metrica data/barca_style/  all 9 damaged training matches
-  /Volumes/T7/Barca dataset/submissions/model_viterbi_v1/, _v2/, _v3/   BAR-ATH labels files
-  The ceiling test, the detector and the diagnostics above were run with one-off scripts that
-  are not in the repository; only their aggregate results are kept here.
+  /Volumes/T7/Barca dataset/submissions/model_viterbi_v1/ ... _v4/   BAR-ATH labels files
+  The ceiling test, the first detector, the diagnostics, the smoothing calibration and the
+  PR #5 feature test above were run with one-off scripts that are not in the repository; only
+  their aggregate results are kept here. Bench 5 is bench_detector.py in the repository.
 
-HOW TO REPRODUCE THE CURRENT SUBMISSION (v3)
+HOW TO REPRODUCE THE CURRENT SUBMISSION (v4)
 --------------------------------------------
   See REPRODUCE.md. In short, with the exact package versions (requirements-pipeline.txt):
   python pipeline/clean.py --data-root <match data> --out <work>/cleaned
   python pipeline/submit.py --clean <work>/cleaned/BAR-ATH_tactical_clean.npz \
-      --model models/lightgbm_v2.txt --out <work>/<team_name>.csv
-  -> md5 cad9aed887ab27f6d4f7b11de3d69c84. Retraining from the external matches (REPRODUCE.md)
-  gives the same model, models/lightgbm_v2.txt (md5 ab751e12a8b0c62900dceb5e7346c4ed); training
-  twice gives a byte-identical model.
+      --model models/lightgbm_v2.txt --detector models/detector_v1.txt --out <work>/<team_name>.csv
+  -> md5 9afc4c4ff4a629777d5da82058595712. Retraining from the external matches (REPRODUCE.md)
+  gives the same models: lightgbm_v2.txt (md5 ab751e12a8b0c62900dceb5e7346c4ed) and
+  detector_v1.txt (md5 ececd6b3613c84b2439793dc8b99be7d); training twice gives byte-identical
+  files. Without --detector the same command gives v3 (md5 cad9aed887ab27f6d4f7b11de3d69c84).
   v2 (md5 c36720f6d30b949cf1c139ac1e4421f5) is reproduced by commit 8623a29 with its own
   models/lightgbm_v1.txt.

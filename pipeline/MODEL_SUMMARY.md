@@ -1,15 +1,16 @@
 # Model summary: what we built, how well it does, where the rules fit
 
-Short overview for the team, as of 2026-11-16 (v3). Full numbers are in
+Short overview for the team, as of 2026-11-17 (v4). Full numbers are in
 [evaluation_results.txt](evaluation_results.txt); how to regenerate the file is in
 [REPRODUCE.md](../REPRODUCE.md).
 
 ## What we built
 
 ```
-BAR-ATH tracking -> clean.py -> model_features.py -> LightGBM -> Viterbi -> labels file
-                                 (90 features)      (H/A/D       (clean
-                                                     per frame)   possessions)
+BAR-ATH tracking -> clean.py -> model_features.py -> LightGBM ---------> Viterbi -> labels file
+                                 (90 features)      (H/A/D per frame)    (clean possessions;
+                                                 -> detector ----------> team switch cheap where
+                                                    (change to H / A)    the detector fires)
 ```
 
 | File | What it does |
@@ -17,10 +18,11 @@ BAR-ATH tracking -> clean.py -> model_features.py -> LightGBM -> Viterbi -> labe
 | `clean.py` | cleans the tracking (already existed) |
 | `model_features.py` | 90 features per frame: ball speed, nearest home/away player, team speeds and shapes, how long the ball has been missing; **time context** (averages over the 0.5 / 1 / 2 s before and after each frame) and what happened around ball gaps; and **touch features** over 2 / 4 / 8 frames (ball turning or speeding up, nearest player or team changing, closest home / away player) |
 | `model.py` | LightGBM model: gives each frame a probability of H, A and D. Fixed seed, deterministic. |
-| `viterbi.py` | turns the per-frame probabilities into clean possessions. Switching team costs 15, entering or leaving a dead ball costs 30. |
-| `training_table.py` | builds the training data from the external matches |
-| `submit.py` | makes the BAR-ATH labels file from the saved model (`models/lightgbm_v2.txt`) |
-| `bench.py`, `bench_viterbi.py` | the evaluation (see below) |
+| `detector.py` | possession-change detector (a second LightGBM, `models/detector_v1.txt`): per frame, the chance that possession changes to H or to A within ±6 frames. Trained on the training matches with their ball smoothed like BAR-ATH's. |
+| `viterbi.py` | turns the per-frame probabilities into clean possessions. With the detector, switching team costs 120 × (1 − P(change))⁴ at each frame; entering or leaving a dead ball costs 30. Without it (v3): 15 and 30. |
+| `training_table.py` | builds the training data from the external matches; `--smooth-ball 6` smooths their ball like BAR-ATH's (for the detector) |
+| `submit.py` | makes the BAR-ATH labels file from the saved models (`--model models/lightgbm_v2.txt --detector models/detector_v1.txt`) |
+| `bench.py`, `bench_viterbi.py`, `bench_detector.py` | the evaluation (see below) |
 | `damage.py` | makes the external matches look like BAR-ATH: removes players the way BAR-ATH loses them, and with `--ball-like` also removes the ball (DFL) the way the Metrica copies lose it |
 
 **Training data (never BAR-ATH):** 7 DFL Bundesliga matches (open data) + Metrica sample games 2
@@ -55,11 +57,24 @@ On our BAR-ATH-style DFL copies (bench 4; easier, so not comparable with the tab
 |---|---|---|
 | Starter baseline | 0.317 | 0.721 |
 | 90 features, trained on the old DFL copies | 0.599 | 0.835 |
-| **90 features, trained on the new DFL copies (v3, current)** | **0.632** | **0.890** |
+| 90 features, trained on the new DFL copies (v3) | 0.632 | 0.890 |
+
+The same matches with their ball smoothed like BAR-ATH's (bench 5; BAR-ATH's video-tracked ball
+has no sharp velocity jumps):
+
+| Version | spellF1 | macroF1 |
+|---|---|---|
+| v3 | 0.609 | 0.881 |
+| **v3 + detector trained on smoothed balls (v4, current)** | **0.638** | **0.887** |
 
 Every step improved all 9 matches. The starter baseline scores 0.243 on the full BAR-ATH match,
-so bench 4 is somewhat easier than BAR-ATH. On the public 5 minutes, v3 passes every correctness
-check (spellF1 0.595, v2 0.512, starter baseline 0.326); that number doesn't decide anything.
+so these benches are somewhat easier than BAR-ATH. On the full BAR-ATH match (no labels) v4
+behaves as on the test matches: 3.38 vs 3.46 possessions per minute, 5.8 vs 6.2 detector alarms
+per minute. On the public 5 minutes every version passes the correctness checks (v4 0.537, v3
+0.595, v2 0.512, starter 0.326: about one possession apart); that window decides nothing.
+
+Tested and not used: nikozirdum's 16 touch features (PR #5) add +0.094 on sharp balls but
+nothing (−0.011) on BAR-ATH-like smooth balls, where their touch detector barely fires.
 
 ## What the model still gets wrong
 
@@ -102,10 +117,9 @@ two places:
   direction, and the nearest player at that moment belongs to the other team.
   - Training targets already exist: every H<->A change in the external labels is a turnover
     frame.
-  - Already tried: the touch features (now in the model) and a separate possession-change
-    detector that makes Viterbi's team switch cheap where it fires. The detector adds +0.041 on
-    bench 4 but behaves differently on BAR-ATH (it removes far more possessions there), so it
-    is not in the submission. Details in evaluation_results.txt.
+  - Done: the touch features (in the model) and the possession-change detector (in Viterbi).
+    The detector only carried over to BAR-ATH once it was trained on smoothed balls; any new
+    ball-based rule should be checked on smoothed balls too (bench_detector.py shows how).
 - **Restarts.** Throw-in, corner, goal kick and kickoff: the ball is still at the line or at a
   known spot, then moves. The team taking it is the one whose player is nearest.
   - Smart Tagging lists 59 set pieces with times. Throw-ins have no team, so take the nearest
@@ -145,8 +159,9 @@ python pipeline/training_table.py --external <external dir> --out <table.csv>
 python pipeline/bench.py         --data <table.csv> --results <folder outside the repo>
 python pipeline/bench_viterbi.py --data <table.csv> --results <same folder>
 ```
-About 15 minutes. Compare against **0.632 spellF1** (bench 4, the current model); a rule should
-beat it by more than about 0.04 to count as real. Also check, without labels, that it behaves the
-same on the full BAR-ATH match as on the test matches (for example possessions per minute: v3
-gives 3.53 on BAR-ATH and 3.57 on the test matches). Never write match data or results inside the
-repo.
+About 15 minutes. Compare against **0.632 spellF1** (bench 4, v3) and, for anything that uses
+the ball's movement, also on smoothed balls against **0.638** (bench 5, v4: `bench_detector.py`
+with a `--smooth-ball 6` table). A rule should beat them by more than about 0.04 to count as
+real. Also check, without labels, that it behaves the same on the full BAR-ATH match as on the
+test matches (for example possessions per minute: v4 gives 3.38 on BAR-ATH and 3.46 on the test
+matches). Never write match data or results inside the repo.
